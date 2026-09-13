@@ -1,0 +1,8 @@
+# PDF & Image processing
+PyMuPDF>=1.24.0
+Pillow>=10.0.0
+
+# Utilities
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+pydantic>=2.6.0
