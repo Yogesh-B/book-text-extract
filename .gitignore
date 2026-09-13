@@ -2,8 +2,12 @@
 /data/
 .venv
 venv
+.env
+
+
 
 # Python bytecode
 __pycache__/
 *.pyc
 *.pyo
+
