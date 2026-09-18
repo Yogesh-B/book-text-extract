@@ -2,7 +2,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from src.config import get_default_device, get_model_path
 from src.utils.logger import get_logger
@@ -17,16 +17,42 @@ def ensure_model_in_sys_path(model_path: Path) -> None:
         sys.path.insert(0, model_str)
 
 
+def set_recognizer_batch_size(parser: Any, batch_size: int) -> None:
+    """Configure internal crop batch_size on IndicOCR recognizer (HfRecognizer)."""
+    configured = False
+    try:
+        if hasattr(parser, "recognizer"):
+            rec = parser.recognizer
+            if hasattr(rec, "backend") and hasattr(rec.backend, "batch_size"):
+                rec.backend.batch_size = batch_size
+                configured = True
+                logger.info(f"Configured IndicOCR recognizer backend batch_size = {batch_size}")
+            if hasattr(rec, "batch_size"):
+                rec.batch_size = batch_size
+                configured = True
+    except Exception as e:
+        logger.warning(f"Could not set recognizer batch_size directly: {e}")
+
+    if not configured:
+        logger.warning(
+            "Unable to locate batch_size property on parser.recognizer.backend. "
+            "Using model default."
+        )
+
+
 def load_indic_ocr(
     model_path: Optional[Path | str] = None,
     device: Optional[str] = None,
     compile_model: bool = False,
+    crop_batch_size: Optional[int] = None,
 ):
     """Load IndicOCR model from local weights.
 
     Args:
         model_path: Custom path to indic-ocr directory. If None, uses default discovery.
         device: 'cuda' or 'cpu'. If None, detects best available device.
+        compile_model: Whether to optimize recognizer with torch.compile.
+        crop_batch_size: Crop batch size from CLI --crop-batch-size (mapped to recognizer batch_size).
 
     Returns:
         Loaded IndicOCR parser instance.
@@ -60,6 +86,20 @@ def load_indic_ocr(
     t0 = time.time()
     parser = IndicOCR.from_pretrained(resolved_path, device=target_device)
     load_time = time.time() - t0
+
+    # Determine batch size: if not explicitly specified via CLI, auto-tune for small GPUs (<=4.5 GB)
+    effective_crop_batch_size = crop_batch_size
+    if effective_crop_batch_size is None and target_device == "cuda":
+        total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        if total_vram_gb <= 4.5:
+            effective_crop_batch_size = 2
+            logger.info(
+                f"Auto-detected {total_vram_gb:.2f} GB GPU VRAM (<= 4.5 GB). "
+                f"Auto-tuning default crop batch_size = {effective_crop_batch_size} to prevent CUDA OOM."
+            )
+
+    if effective_crop_batch_size is not None:
+        set_recognizer_batch_size(parser, effective_crop_batch_size)
 
     if compile_model:
         logger.info("Applying torch.compile(dynamic=True) to recognizer model...")

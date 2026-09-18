@@ -4,10 +4,13 @@ Integrates PP-DocLayoutV3 block layout parsing with Qwen3.5/Sarvam Gujarati OCR,
 applying geometric column reordering to produce clean structured JSON and Markdown.
 """
 
+import gc
 import json
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+import torch
 
 from src.phase2_indic_ocr.model_loader import load_indic_ocr
 from src.phase2_indic_ocr.reorder import reorder_ocr_blocks
@@ -25,6 +28,7 @@ class IndicOCRParser:
         device: Optional[str] = None,
         engine: Optional[Any] = None,
         compile_model: bool = False,
+        crop_batch_size: Optional[int] = None,
     ):
         """Initialize IndicOCR parser.
 
@@ -33,7 +37,9 @@ class IndicOCRParser:
             device: 'cuda' or 'cpu'.
             engine: Optional pre-loaded IndicOCR instance.
             compile_model: Whether to optimize recognizer using torch.compile(dynamic=True).
+            crop_batch_size: Crop batch size from CLI --crop-batch-size (mapped to recognizer batch_size).
         """
+        self.crop_batch_size = crop_batch_size
         if engine is not None:
             self.engine = engine
         else:
@@ -41,7 +47,16 @@ class IndicOCRParser:
                 model_path=model_path,
                 device=device,
                 compile_model=compile_model,
+                crop_batch_size=crop_batch_size,
             )
+
+    @staticmethod
+    def cleanup_memory() -> None:
+        """Free cached GPU memory and trigger garbage collection."""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        gc.collect()
 
     def parse_page(
         self,
@@ -64,7 +79,8 @@ class IndicOCRParser:
             raise FileNotFoundError(f"Page image not found: {img_path}")
 
         t0 = time.time()
-        raw_result = self.engine.parse(str(img_path))
+        with torch.inference_mode():
+            raw_result = self.engine.parse(str(img_path))
         inference_time = time.time() - t0
 
         if reorder:
@@ -76,6 +92,8 @@ class IndicOCRParser:
         result["image_name"] = img_path.name
         result["image_path"] = str(img_path)
         result["inference_duration_sec"] = round(inference_time, 2)
+
+        self.cleanup_memory()
 
         return result
 

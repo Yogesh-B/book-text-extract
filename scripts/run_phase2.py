@@ -7,11 +7,15 @@ Tracks progress via checkpoint.json for crash recovery and resumption.
 """
 
 import argparse
+import os
 import re
 import sys
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+# Enable expandable segments by default to avoid PyTorch CUDA memory fragmentation on <=4GB GPUs
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -175,8 +179,15 @@ def process_book(
                 logger.exception(f"Failed OCR for {book_slug} page {pnum}: {e}")
                 checkpoint.record_failure(page_num=pnum, error_msg=str(e))
                 checkpoint.save()
+                if "out of memory" in str(e).lower():
+                    logger.warning(
+                        f"VRAM Out-of-Memory encountered on page {pnum}. "
+                        "If this page fails repeatedly, consider running with --device cpu."
+                    )
 
-            pbar.update(1)
+            finally:
+                parser.cleanup_memory()
+                pbar.update(1)
 
     checkpoint.save(is_final=True)
     logger.info(
@@ -266,6 +277,12 @@ def main():
         action="store_true",
         help="Force overwrite of existing OCR outputs and re-run completed pages",
     )
+    parser.add_argument(
+        "--crop-batch-size",
+        type=int,
+        default=None,
+        help="Batch size of text-box image crops during recognizer inference (default: auto 2 on <=4.5GB GPUs, 8 on larger GPUs). Set to 1 or 2 to prevent CUDA OOM on dense pages.",
+    )
 
     args = parser.parse_args()
 
@@ -307,6 +324,7 @@ def main():
         model_path=args.model_path,
         device=args.device,
         compile_model=args.compile,
+        crop_batch_size=args.crop_batch_size,
     )
 
     grand_total_processed = 0
