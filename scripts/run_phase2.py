@@ -33,17 +33,9 @@ from src.config import (
 from src.phase2_indic_ocr.checkpoint_manager import CheckpointManager
 from src.phase2_indic_ocr.parser import IndicOCRParser
 from src.utils.logger import get_logger
+from src.utils.pages import parse_page_selection
 
 logger = get_logger("run_phase2")
-
-
-def parse_page_range(range_str: str) -> Tuple[int, int]:
-    """Parse a page range string such as '1-20' or '15'."""
-    if "-" in range_str:
-        parts = range_str.split("-")
-        return int(parts[0].strip()), int(parts[1].strip())
-    page = int(range_str.strip())
-    return page, page
 
 
 def extract_page_num_from_path(p: Path) -> Optional[int]:
@@ -69,7 +61,8 @@ def process_book(
     images_dir: Path,
     book_slug: str,
     parser: IndicOCRParser,
-    target_page_range: Optional[Tuple[int, int]] = None,
+    target_page_numbers: Optional[List[int]] = None,
+    retry_failed: bool = False,
     max_pages: Optional[int] = None,
     reorder: bool = True,
     y_tolerance: float = 20.0,
@@ -87,14 +80,6 @@ def process_book(
     total_pages_found = len(all_pages)
     logger.info(f"Discovered {total_pages_found} page image(s) for '{book_slug}'.")
 
-    # Apply page range filter if requested
-    if target_page_range:
-        p_start, p_end = target_page_range
-        all_pages = [p for p in all_pages if p_start <= p[0] <= p_end]
-
-    if max_pages is not None:
-        all_pages = all_pages[:max_pages]
-
     # Setup directories
     if output_root:
         base_dir = output_root / book_slug
@@ -106,15 +91,32 @@ def process_book(
         raw_md_dir = get_ocr_raw_md_dir(book_slug)
         checkpoint_path = get_ocr_checkpoint_file(book_slug)
 
-    raw_json_dir.mkdir(parents=True, exist_ok=True)
-    raw_md_dir.mkdir(parents=True, exist_ok=True)
-
-    # Initialize Checkpoint Manager
+    # Initialize Checkpoint Manager early to check for retries
     checkpoint = CheckpointManager(
         checkpoint_path=checkpoint_path,
         book_slug=book_slug,
         total_pages=total_pages_found,
     )
+
+    # Apply page filters if requested
+    if retry_failed:
+        failed_nums = set()
+        for p_str in checkpoint.failed_pages.keys():
+            try:
+                failed_nums.add(int(p_str))
+            except ValueError:
+                pass
+        # Also check for uncompleted pages
+        failed_nums.update(p for p, _ in all_pages if not checkpoint.is_completed(p, raw_json_dir, raw_md_dir))
+        all_pages = [p for p in all_pages if p[0] in failed_nums]
+        logger.info(f"Retry-failed mode active: filtered to {len(all_pages)} failed/incomplete page(s).")
+
+    if target_page_numbers is not None:
+        target_set = set(target_page_numbers)
+        all_pages = [p for p in all_pages if p[0] in target_set]
+
+    if max_pages is not None:
+        all_pages = all_pages[:max_pages]
 
     # Identify pages that need processing
     pending_pages = []
@@ -229,7 +231,12 @@ def main():
         "--pages",
         type=str,
         default=None,
-        help="Page range to process, e.g. '1-20' or '50'",
+        help="Page range to process, e.g. '1-20', '50', or '5,12,40-45'",
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Only process pages that previously failed or have missing outputs in checkpoint",
     )
     parser.add_argument(
         "--max-pages",
@@ -315,7 +322,7 @@ def main():
             sys.exit(1)
         logger.info(f"Found {len(books_to_process)} book(s) to process.")
 
-    target_page_range = parse_page_range(args.pages) if args.pages else None
+    target_page_numbers = parse_page_selection(args.pages) if args.pages else None
     output_root = Path(args.output_dir).resolve() if args.output_dir else None
 
     # Lazy-load parser once for all books
@@ -337,7 +344,8 @@ def main():
             images_dir=img_dir,
             book_slug=slug,
             parser=ocr_parser,
-            target_page_range=target_page_range,
+            target_page_numbers=target_page_numbers,
+            retry_failed=args.retry_failed,
             max_pages=args.max_pages,
             reorder=not args.no_reorder,
             y_tolerance=args.y_tolerance,

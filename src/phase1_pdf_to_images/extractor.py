@@ -147,6 +147,7 @@ class PDFImageExtractor:
         self,
         start_page: Optional[int] = None,
         end_page: Optional[int] = None,
+        page_numbers: Optional[List[int]] = None,
         max_pages: Optional[int] = None,
         force: bool = False,
         chunk_size: int = 10,
@@ -156,6 +157,7 @@ class PDFImageExtractor:
         Args:
             start_page: 1-indexed start page (inclusive).
             end_page: 1-indexed end page (inclusive).
+            page_numbers: Explicit list of 1-indexed page numbers to extract.
             max_pages: Limit total pages to extract.
             force: If True, re-render already existing page images.
             chunk_size: Number of pages processed per worker batch.
@@ -169,19 +171,30 @@ class PDFImageExtractor:
         doc.close()
 
         # Determine target page indices (0-indexed)
-        p_start = max(1, start_page or 1)
-        p_end = min(total_pdf_pages, end_page or total_pdf_pages)
-        if max_pages is not None:
-            p_end = min(p_end, p_start + max_pages - 1)
+        if page_numbers is not None:
+            valid_pnums = sorted(list(set(p for p in page_numbers if 1 <= p <= total_pdf_pages)))
+            if max_pages is not None:
+                valid_pnums = valid_pnums[:max_pages]
+            target_indices = [p - 1 for p in valid_pnums]
+            logger.info(
+                f"Book: '{self.book_slug}' | Total PDF Pages: {total_pdf_pages} | "
+                f"Extracting {len(target_indices)} specific page(s) at {self.dpi} DPI "
+                f"using {self.workers} workers"
+            )
+        else:
+            p_start = max(1, start_page or 1)
+            p_end = min(total_pdf_pages, end_page or total_pdf_pages)
+            if max_pages is not None:
+                p_end = min(p_end, p_start + max_pages - 1)
 
-        target_indices = list(range(p_start - 1, p_end))
+            target_indices = list(range(p_start - 1, p_end))
+            logger.info(
+                f"Book: '{self.book_slug}' | Total PDF Pages: {total_pdf_pages} | "
+                f"Extracting Pages {p_start} to {p_end} ({len(target_indices)} pages) at {self.dpi} DPI "
+                f"using {self.workers} workers"
+            )
+
         total_to_process = len(target_indices)
-
-        logger.info(
-            f"Book: '{self.book_slug}' | Total PDF Pages: {total_pdf_pages} | "
-            f"Extracting Pages {p_start} to {p_end} ({total_to_process} pages) at {self.dpi} DPI "
-            f"using {self.workers} workers"
-        )
 
         # Divide into chunks for workers
         chunks = []

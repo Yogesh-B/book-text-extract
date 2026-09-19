@@ -16,17 +16,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.config import BOOKS_DIR, DEFAULT_DPI, DEFAULT_WORKERS
 from src.phase1_pdf_to_images.extractor import PDFImageExtractor
 from src.utils.logger import get_logger
+from src.utils.pages import parse_page_selection
 
 logger = get_logger("run_phase1")
 
 
 def parse_page_range(range_str: str) -> tuple[int, int]:
     """Parse page range like '1-20' or '10'."""
-    if "-" in range_str:
-        parts = range_str.split("-")
-        return int(parts[0].strip()), int(parts[1].strip())
-    page = int(range_str.strip())
-    return page, page
+    pages = parse_page_selection(range_str)
+    return min(pages), max(pages)
 
 
 def main():
@@ -108,10 +106,9 @@ def main():
             sys.exit(1)
         pdf_files = [target]
 
-    start_page = None
-    end_page = None
+    target_page_numbers = None
     if args.pages:
-        start_page, end_page = parse_page_range(args.pages)
+        target_page_numbers = parse_page_selection(args.pages)
 
     total_extracted = 0
     total_skipped = 0
@@ -128,8 +125,7 @@ def main():
                 book_slug=args.slug if len(pdf_files) == 1 else None,
             )
             result = extractor.extract(
-                start_page=start_page,
-                end_page=end_page,
+                page_numbers=target_page_numbers,
                 max_pages=args.max_pages,
                 force=args.force,
             )
