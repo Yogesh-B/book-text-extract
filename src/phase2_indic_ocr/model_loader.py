@@ -83,6 +83,13 @@ def load_indic_ocr(
         vram_alloc = torch.cuda.memory_allocated(0) / (1024 * 1024)
         logger.info(f"GPU: {gpu_name} (Initial allocated VRAM: {vram_alloc:.1f} MB)")
 
+    if target_device == "cuda":
+        torch.backends.cudnn.benchmark = True
+        logger.info("cuDNN benchmark mode enabled (auto-selects fastest convolution kernel).")
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        logger.info("TF32 enabled for matmul and cuDNN (Tensor Core acceleration on Ampere+).")
+
     t0 = time.time()
     parser = IndicOCR.from_pretrained(resolved_path, device=target_device)
     load_time = time.time() - t0
