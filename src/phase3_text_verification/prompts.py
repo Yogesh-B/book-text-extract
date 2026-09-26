@@ -19,19 +19,29 @@ Your ONLY task is to audit OCR output and fix obvious OCR machine defects.
 ══ STRICT RULES — READ CAREFULLY ══
 1. DO NOT rephrase, summarize, modernize, or translate ANY part of the text.
 2. DO NOT add, remove, or reorder sentences or paragraphs.
-3. DO NOT alter sacred, proper, or technical terminology:
+3. NEVER add a word that is not already present in the input, even if a sentence
+   seems incomplete. A seemingly missing word means the OCR misread an existing
+   word — correct THAT word in place; do not insert an extra word.
+4. NEVER delete a word from the input, even if it looks like noise. If a token
+   is clearly garbled, replace it with the correct Gujarati word; do not drop it.
+   Word count must stay the same (except when fixing intra-word spaces, see 5c).
+5. DO NOT alter sacred, proper, or technical terminology:
    - Names: સ્વામિનારાયણ, હરિ, ભગવાન, ગોપાળ, etc.
    - Titles: સ્વામીશ્રી, શ્રીજી, ગુરુ, સંત, etc.
    - Sectarian terms: વચનામૃત, સંપ્રદાય, ભક્ત, ધ્યાન, લીલાચરિત્ર, etc.
-4. ONLY correct these specific OCR defects:
-   a) Broken ligatures / conjuncts  (e.g., 'ભ ક ત' → 'ભક્ત')
-   b) Misread matras                (e.g., હ્રસ્વ/દીર્ઘ confusion: ે/ૈ, ો/ૌ)
-   c) Accidental spaces inside a word (e.g., 'ભ ક્ત' → 'ભક્ત')
-   d) Stray punctuation from paper smudges / borders (e.g., leading '?', '|', '।')
-   e) Clearly repeated duplicate lines (keep the first occurrence only)
-   f) Unicode normalization: replace lookalike Latin letters with Gujarati equivalents
-5. If you are UNSURE whether something is an OCR error or intentional, LEAVE IT UNCHANGED.
-6. Preserve ALL blank lines, section dividers (─, ══, ❋, ☞, etc.), and page numbers.
+6. ONLY correct these specific OCR defects:
+   a) Wrong spelling / incorrect matras caused by OCR misread
+      (e.g., ે/ૈ confusion, હ્રસ્વ/દીર્ઘ confusion, wrong consonant)
+   b) Garbled / nonsense character sequence — replace with the correct Gujarati
+      word that fits the sentence context (in-place, same position, no extra words)
+   c) Accidental spaces INSIDE a word — merge them
+      (e.g., 'ભ ક્ત' → 'ભક્ત';  'સ્વા મિ' → 'સ્વામિ')
+   d) Broken ligatures / conjuncts  (e.g., 'ભ ક ત' → 'ભક્ત')
+   e) Stray punctuation from paper smudges / borders (e.g., leading '?', '|', '।')
+   f) Clearly repeated duplicate lines (keep the first occurrence only)
+   g) Unicode normalization: replace lookalike Latin letters with Gujarati equivalents
+7. If you are UNSURE whether something is an OCR error or intentional, LEAVE IT UNCHANGED.
+8. Preserve ALL blank lines, section dividers (─, ══, ❋, ☞, etc.), and page numbers.
 
 ══ OUTPUT FORMAT ══
 Return ONLY the corrected Gujarati text inside a fenced code block:
@@ -54,8 +64,11 @@ def build_user_message(page_num: int, raw_text: str) -> str:
     raw_text:  The raw OCR markdown content for this page
     """
     return (
-        f"[Page {page_num}] Please proofread the following raw Gujarati OCR output "
-        f"and return ONLY the corrected text in a ```gujarati``` code block.\n\n"
+        f"[Page {page_num}] Proofread the following raw Gujarati OCR text.\n"
+        f"Fix ONLY spelling (જોડણી) errors and accidental spaces inside words.\n"
+        f"If a word is garbled by OCR, replace it with the correct Gujarati word "
+        f"in the same position — do NOT add or remove any words.\n"
+        f"Return ONLY the corrected text in a ```gujarati``` code block.\n\n"
         f"Raw OCR text:\n"
         f"```\n"
         f"{raw_text}\n"

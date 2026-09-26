@@ -410,26 +410,54 @@ New#  Old#     Y-Top  Side    Snippet
 
 ---
 
-## `run_phase3_verify.py` — LLM Verification & Patch Generation
+ ## `run_phase3_verify.py` — LLM Verification & Patch Generation
 
-**Purpose:** Send raw OCR markdown pages through the local Gemma 4 model (via `llama-server` OpenAI-compatible API) to detect OCR defects. Produces per-page unified diff `.patch` files, structured JSON change logs, and an interactive HTML audit report. **Raw OCR files are never modified.**
+**Purpose:** Send raw OCR markdown pages through an LLM to detect OCR defects. Supports two backends: a **local `llama-server`** (OpenAI-compatible HTTP API) or the **Antigravity CLI (`agy`)** using your Google AI Pro free quota. Produces per-page unified diff `.patch` files, structured JSON change logs, and an interactive HTML audit report. **Raw OCR files are never modified.**
 
-> **Prerequisite:** `llama-server` must be running on port 8080 before invoking this script.
+### Backends
+
+**Local llama-server** (default)
+> Requires `llama-server` running on port 8080 before invoking this script:
 > ```bash
 > llama-server -m ~/models/gemma-4-E2B-it-qat-GGUF/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --port 8080
 > ```
 
+**Antigravity CLI (`--agy`)**
+> Uses the `agy` CLI and your Google AI Pro plan free quota — no local GPU or API key needed.
+> Requires `agy` to be installed and authenticated.
+
 ### Usage
 
 ```bash
-# Process all pages of a book
+# ── Local llama-server backend (default) ─────────────────────────────────────
+
+# Process all pages
 python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha
 
-# Specify server URL and model name explicitly
+# Specify server URL and model explicitly
 python scripts/run_phase3_verify.py \
   --book-slug Aadarsh_bhaktgatha \
   --server-url http://127.0.0.1:8080/v1 \
   --model-name gemma-4-e2b
+
+# ── Antigravity CLI backend ───────────────────────────────────────────────────
+
+# Process all pages via agy (free quota, default model)
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --agy
+
+# Use a specific Gemini model
+python scripts/run_phase3_verify.py \
+  --book-slug Aadarsh_bhaktgatha \
+  --agy \
+  --model-name gemini-3.6-flash-low
+
+# Run 4 pages concurrently (recommended for --agy to hide per-call startup cost)
+python scripts/run_phase3_verify.py \
+  --book-slug Aadarsh_bhaktgatha \
+  --agy \
+  --workers 4
+
+# ── Shared options (both backends) ───────────────────────────────────────────
 
 # Smoke test: first 5 pages only
 python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --pages 1-5
@@ -443,7 +471,7 @@ python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --force
 # Skip generating the HTML report
 python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --no-report
 
-# Increase timeout for slow hardware
+# Increase timeout for slow hardware or large pages
 python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --timeout 300
 ```
 
@@ -452,13 +480,24 @@ python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --timeout 300
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--book-slug` | `str` | **required** | Book slug (subdirectory name under `data/ocr_output/`) |
-| `--server-url` | `str` | `http://127.0.0.1:8080/v1` | Base URL of the llama-server OpenAI-compatible API |
-| `--model-name` | `str` | `gemma-4-e2b` | Model ID passed in API requests |
+| `--agy` | flag | off | Use Antigravity CLI (`agy`) instead of local llama-server |
+| `--server-url` | `str` | `http://127.0.0.1:8080/v1` | llama-server base URL (ignored when `--agy` is set) |
+| `--model-name` | `str` | `gemma-4-e2b` / `gemini-3.6-flash-low` | Model ID; defaults differ per backend |
 | `--pages` | `str` | all pages | Page range: `'1-10'`, `'5'`. Omit to process all pages. |
 | `--timeout` | `float` | `180` | Per-request timeout in seconds |
-| `--max-tokens` | `int` | `4096` | Maximum tokens for the LLM response |
+| `--max-tokens` | `int` | `4096` | Maximum tokens for the LLM response (ignored when `--agy` is set) |
+| `--workers` | `int` | `4` | Number of pages processed concurrently (see note below) |
 | `--force` | flag | off | Re-process pages that already have patch files |
 | `--no-report` | flag | off | Skip generating `diff_summary.html` |
+
+> **`--workers` note:**
+> - **`--agy` (cloud):** Each page spawns its own `agy` subprocess. Workers overlap
+>   network round-trips and CLI startup latency → significant real-world speedup.
+>   Keep `--workers ≤ 6` to stay within free-quota rate limits; the built-in
+>   3-retry / 5 s back-off handles transient `429` errors automatically.
+> - **Local llama-server:** `--workers > 1` is safe (the HTTP client is thread-safe),
+>   but the GPU/CPU is the bottleneck — concurrent requests simply queue at the server.
+>   Stick with `--workers 1` for local inference to avoid unnecessary overhead.
 
 ### Outputs
 

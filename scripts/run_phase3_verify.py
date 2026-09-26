@@ -10,6 +10,7 @@ Usage (from project root):
     --server-url http://127.0.0.1:8080/v1 \\
     --model-name gemma-4-e2b \\
     [--pages 1-10] \\
+    [--workers 4] \\
     [--force] \\
     [--no-report]
 
@@ -18,7 +19,13 @@ Usage (from project root):
     --book-slug Aadarsh_bhaktgatha \\
     --agy \\
     [--model-name gemini-3.6-flash-low] \\
+    [--workers 4] \\
     [--pages 1-10]
+
+  Tip: --workers controls how many pages are processed concurrently.
+  When using --agy, each page spawns its own `agy` subprocess, so
+  workers=4 means 4 pages run in parallel (overlapping network/startup
+  latency). Keep workers <= 4-6 to stay within free-quota rate limits.
 
 Environment variables (local backend fallbacks):
   LLM_BASE_URL      default: http://127.0.0.1:8080/v1
@@ -30,6 +37,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # ── make sure src/ is on the path ───────────────────────────────────────────
@@ -114,6 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-report", action="store_true",
         help="Skip generating the HTML summary report",
     )
+    p.add_argument(
+        "--workers", type=int, default=4,
+        help="Number of pages to process concurrently (default: 4). "
+             "When using --agy, each worker spawns a separate `agy` subprocess "
+             "so pages run in parallel. Keep <=6 to avoid free-quota rate limits.",
+    )
     return p
 
 
@@ -178,36 +192,54 @@ def main() -> int:
     page_nums = _parse_page_range(args.pages, max_page)
     page_nums = [p for p in page_nums if 1 <= p <= max_page]
 
+    workers = max(1, args.workers)
     logger.info(
-        "Processing %d page(s) for book '%s'…",
-        len(page_nums), book_slug,
+        "Processing %d page(s) for book '%s' with %d concurrent worker(s)…",
+        len(page_nums), book_slug, workers,
     )
 
-    # ── process pages ─────────────────────────────────────────────────────────
-    ok = skipped = errors = 0
+    # ── build per-page tasks (filter out missing files up-front) ─────────────
+    tasks: list[tuple[int, Path]] = []
+    skipped = 0
+    for page_num in page_nums:
+        md_path = raw_md_dir / f"page_{page_num:04d}.md"
+        if not md_path.exists():
+            logger.warning("page_%04d.md not found – skipping.", page_num)
+            skipped += 1
+        else:
+            tasks.append((page_num, md_path))
+
+    # ── process pages concurrently ────────────────────────────────────────────
+    ok = errors = 0
+
+    def _process(page_num: int, md_path: Path):
+        """Worker target: calls process_page and returns (page_num, result)."""
+        return page_num, process_page(
+            page_num=page_num,
+            md_path=md_path,
+            patches_dir=patches_dir,
+            client=client,
+            book_slug=book_slug,
+            force=args.force,
+        )
+
     with client:
-        for page_num in page_nums:
-            md_path = raw_md_dir / f"page_{page_num:04d}.md"
-            if not md_path.exists():
-                logger.warning("page_%04d.md not found – skipping.", page_num)
-                skipped += 1
-                continue
-            try:
-                result = process_page(
-                    page_num=page_num,
-                    md_path=md_path,
-                    patches_dir=patches_dir,
-                    client=client,
-                    book_slug=book_slug,
-                    force=args.force,
-                )
-                if result is None:
-                    skipped += 1
-                else:
-                    ok += 1
-            except Exception as exc:
-                logger.error("Error processing page %d: %s", page_num, exc)
-                errors += 1
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_process, pn, mp): pn
+                for pn, mp in tasks
+            }
+            for fut in as_completed(futures):
+                pn = futures[fut]
+                try:
+                    _, result = fut.result()
+                    if result is None:
+                        skipped += 1
+                    else:
+                        ok += 1
+                except Exception as exc:
+                    logger.error("Error processing page %d: %s", pn, exc)
+                    errors += 1
 
     # ── merge into book_full.patch ────────────────────────────────────────────
     full_patch = patches_dir / "book_full.patch"
