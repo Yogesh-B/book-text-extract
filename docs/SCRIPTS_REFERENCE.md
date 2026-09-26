@@ -13,8 +13,10 @@ Complete reference for all pipeline scripts in the `scripts/` directory.
 5. [report_failures.py — Audit & Failure Report](#report_failurespy--audit--failure-report)
 6. [retry_failed.py — Targeted Page Retry](#retry_failedpy--targeted-page-retry)
 7. [reorder_blocks.py — Post-Processing Layout Inspector](#reorder_blockspy--post-processing-layout-inspector)
-8. [Directory Layout](#directory-layout)
-9. [Common Workflows](#common-workflows)
+8. [run_phase3_verify.py — LLM Verification & Patch Generation](#run_phase3_verifypy--llm-verification--patch-generation)
+9. [apply_patches.py — Patch Review & Application](#apply_patchespy--patch-review--application)
+10. [Directory Layout](#directory-layout)
+11. [Common Workflows](#common-workflows)
 
 ---
 
@@ -28,10 +30,21 @@ data/images/<book_slug>/page_NNNN.png
     |
     v  (Phase 2)
 data/ocr_output/<book_slug>/
-    +-- checkpoint.json          <- crash-recovery state
-    +-- raw/
-        +-- json/page_NNNN.json  <- immutable structured OCR result
+    +-- checkpoint.json              <- crash-recovery state
+    +-- raw/                         <- IMMUTABLE; never overwritten
+        +-- json/page_NNNN.json
         +-- markdown/page_NNNN.md
+    |
+    v  (Phase 3 — run_phase3_verify.py)
+data/ocr_output/<book_slug>/patches/
+    +-- page_NNNN.patch              <- standard unified diff per page
+    +-- page_NNNN_diff.json          <- structured change log
+    +-- book_full.patch              <- all pages combined
+    +-- diff_summary.html            <- interactive visual audit report
+    |
+    v  (Phase 3.5 — apply_patches.py)
+data/ocr_output/<book_slug>/verified/
+    +-- markdown/page_NNNN.md        <- approved corrected text
 ```
 
 The **safe batch script** drives Phase 1 -> Phase 2 for each book in a part file, cleans up intermediate images between books to stay within disk budget, and then automatically retries any failed pages.
@@ -397,6 +410,143 @@ New#  Old#     Y-Top  Side    Snippet
 
 ---
 
+## `run_phase3_verify.py` — LLM Verification & Patch Generation
+
+**Purpose:** Send raw OCR markdown pages through the local Gemma 4 model (via `llama-server` OpenAI-compatible API) to detect OCR defects. Produces per-page unified diff `.patch` files, structured JSON change logs, and an interactive HTML audit report. **Raw OCR files are never modified.**
+
+> **Prerequisite:** `llama-server` must be running on port 8080 before invoking this script.
+> ```bash
+> llama-server -m ~/models/gemma-4-E2B-it-qat-GGUF/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --port 8080
+> ```
+
+### Usage
+
+```bash
+# Process all pages of a book
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha
+
+# Specify server URL and model name explicitly
+python scripts/run_phase3_verify.py \
+  --book-slug Aadarsh_bhaktgatha \
+  --server-url http://127.0.0.1:8080/v1 \
+  --model-name gemma-4-e2b
+
+# Smoke test: first 5 pages only
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --pages 1-5
+
+# Single page
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --pages 14
+
+# Re-process pages that already have patches (overwrite)
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --force
+
+# Skip generating the HTML report
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --no-report
+
+# Increase timeout for slow hardware
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha --timeout 300
+```
+
+### Arguments
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--book-slug` | `str` | **required** | Book slug (subdirectory name under `data/ocr_output/`) |
+| `--server-url` | `str` | `http://127.0.0.1:8080/v1` | Base URL of the llama-server OpenAI-compatible API |
+| `--model-name` | `str` | `gemma-4-e2b` | Model ID passed in API requests |
+| `--pages` | `str` | all pages | Page range: `'1-10'`, `'5'`. Omit to process all pages. |
+| `--timeout` | `float` | `180` | Per-request timeout in seconds |
+| `--max-tokens` | `int` | `4096` | Maximum tokens for the LLM response |
+| `--force` | flag | off | Re-process pages that already have patch files |
+| `--no-report` | flag | off | Skip generating `diff_summary.html` |
+
+### Outputs
+
+| Path | Description |
+|------|-------------|
+| `data/ocr_output/<slug>/patches/page_NNNN.patch` | Standard unified diff (empty if no changes found) |
+| `data/ocr_output/<slug>/patches/page_NNNN_diff.json` | Structured change log: `{line, type, original, proposed, reason}` |
+| `data/ocr_output/<slug>/patches/book_full.patch` | All per-page patches concatenated |
+| `data/ocr_output/<slug>/patches/diff_summary.html` | Dark-theme interactive HTML report with filter buttons |
+
+### Change Types
+
+| Type | Description |
+|------|-------------|
+| `punctuation_clean` | Stray leading `?`, `|`, `।` from paper smudges or borders |
+| `space_fix` | Accidental space splitting a single Gujarati word |
+| `conjunct_fix` | Broken ligature / conjunct (e.g., `ભ ક ત` → `ભક્ત`) |
+| `spelling_fix` | Misread matra or character substitution |
+| `insert` / `remove` | Line-level additions or deletions |
+
+### Resume Behaviour
+
+Pages that already have both a `.patch` and `_diff.json` file are skipped automatically. Use `--force` to override.
+
+---
+
+## `apply_patches.py` — Patch Review & Application
+
+**Purpose:** Review the LLM-proposed changes and selectively apply them into `verified/markdown/`. Supports three modes: interactive hunk-by-hunk prompting, batch auto-accept, and dry-run preview. **Raw OCR files are never modified.**
+
+### Usage
+
+```bash
+# Interactive mode (default) — prompted per change
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha
+
+# Dry-run — preview all proposed changes without writing anything
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha --dry-run
+
+# Batch: auto-accept only safe low-risk types (punctuation + space)
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha \
+  --batch --accept-types punctuation_clean space_fix
+
+# Batch: auto-accept all change types
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha --batch --all
+
+# Process a specific page range
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha --pages 1-10
+
+# Single page, interactive
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha --pages 14
+```
+
+### Arguments
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--book-slug` | `str` | **required** | Book slug (subdirectory name under `data/ocr_output/`) |
+| `--pages` | `str` | all pages | Page range: `'1-10'`, `'5'`. Omit to process all pages. |
+| `--interactive` | flag | **default** | Prompt `[y/n/a/q]` for each proposed change |
+| `--batch` | flag | off | Auto-accept without prompting (mutually exclusive with `--interactive`) |
+| `--dry-run` | flag | off | Preview only — no files written (mutually exclusive with `--interactive`) |
+| `--accept-types` | `str…` | `punctuation_clean space_fix` | With `--batch`: only accept changes of these types |
+| `--all` | flag | off | With `--batch`: accept all change types regardless of type |
+
+### Interactive Prompt
+
+```
+══════════════════════════════════════════════════════════════
+[Page 14] – 2 proposed change(s)
+
+  [1/2] Line   8 [punctuation_clean]
+    - '? દૂધપાક કરે પણ અંદર સાકર ન નાખે તો'
+    + 'દૂધપાક કરે પણ અંદર સાકર ન નાખે તો'
+    ℹ  OCR correction (punctuation_clean)
+  Apply? [y]es / [n]o / [a]ll remaining / [q]uit >
+```
+
+### Outputs
+
+| Path | Description |
+|------|-------------|
+| `data/ocr_output/<slug>/verified/markdown/page_NNNN.md` | Corrected text with accepted changes applied |
+
+Pages with zero proposed changes are copied from raw to verified unchanged.
+
+---
+
 ## Directory Layout
 
 ```
@@ -408,10 +558,17 @@ text-extract/
 |   |       +-- manifest.json
 |   |       +-- page_NNNN.png
 |   +-- ocr_output/
-|       +-- <book_slug>/          <- Phase 2 output (persistent)
-|           +-- checkpoint.json
-|           +-- raw/
-|               +-- json/page_NNNN.json
+|       +-- <book_slug>/
+|           +-- checkpoint.json   <- Phase 2 crash-recovery state
+|           +-- raw/              <- IMMUTABLE Phase 2 output
+|           |   +-- json/page_NNNN.json
+|           |   +-- markdown/page_NNNN.md
+|           +-- patches/          <- Phase 3 output
+|           |   +-- page_NNNN.patch
+|           |   +-- page_NNNN_diff.json
+|           |   +-- book_full.patch
+|           |   +-- diff_summary.html
+|           +-- verified/         <- Phase 3.5 output (human-approved)
 |               +-- markdown/page_NNNN.md
 +-- temp/
 |   +-- parts/
@@ -423,6 +580,8 @@ text-extract/
     +-- report_failures.py
     +-- retry_failed.py
     +-- reorder_blocks.py
+    +-- run_phase3_verify.py      <- Phase 3: LLM verification
+    +-- apply_patches.py          <- Phase 3.5: patch review & apply
 ```
 
 ---
@@ -485,4 +644,50 @@ python scripts/run_phase2.py --book MyBook --device cpu
 
 ```bash
 python scripts/reorder_blocks.py data/ocr_output/MyBook/raw/json/page_0042.json
+```
+
+### Run Phase 3 LLM verification (requires llama-server on port 8080)
+
+```bash
+# Smoke test: verify first 5 pages
+python scripts/run_phase3_verify.py \
+  --book-slug Aadarsh_bhaktgatha \
+  --pages 1-5
+
+# Full book
+python scripts/run_phase3_verify.py --book-slug Aadarsh_bhaktgatha
+
+# Open the HTML report to audit results
+xdg-open data/ocr_output/Aadarsh_bhaktgatha/patches/diff_summary.html
+```
+
+### Review and apply patches (Phase 3.5)
+
+```bash
+# Interactive: decide hunk-by-hunk
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha
+
+# Dry-run first to preview without touching files
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha --dry-run
+
+# Batch: auto-apply only safe punctuation/space fixes
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha \
+  --batch --accept-types punctuation_clean space_fix
+
+# Batch: accept every proposed change
+python scripts/apply_patches.py --book-slug Aadarsh_bhaktgatha --batch --all
+```
+
+### Using standard Unix patch tooling
+
+Because patches are standard unified diffs, you can also use native tools:
+
+```bash
+# Dry-run inspection
+patch --dry-run -p1 -d data/ocr_output/Aadarsh_bhaktgatha/ \
+  < data/ocr_output/Aadarsh_bhaktgatha/patches/book_full.patch
+
+# Apply all accepted patches
+patch -p1 -d data/ocr_output/Aadarsh_bhaktgatha/ \
+  < data/ocr_output/Aadarsh_bhaktgatha/patches/book_full.patch
 ```
