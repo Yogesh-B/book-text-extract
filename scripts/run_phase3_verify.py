@@ -3,6 +3,8 @@
 scripts/run_phase3_verify.py — Phase 3 CLI: LLM verification & patch generation.
 
 Usage (from project root):
+
+  # Local llama-server backend (default):
   python scripts/run_phase3_verify.py \\
     --book-slug Aadarsh_bhaktgatha \\
     --server-url http://127.0.0.1:8080/v1 \\
@@ -11,7 +13,14 @@ Usage (from project root):
     [--force] \\
     [--no-report]
 
-Environment variables (fallbacks):
+  # Antigravity CLI backend (gemini-3.6-flash-low by default):
+  python scripts/run_phase3_verify.py \\
+    --book-slug Aadarsh_bhaktgatha \\
+    --agy \\
+    [--model-name gemini-3.6-flash-low] \\
+    [--pages 1-10]
+
+Environment variables (local backend fallbacks):
   LLM_BASE_URL      default: http://127.0.0.1:8080/v1
   LLM_MODEL_NAME    default: gemma-4-e2b
 """
@@ -29,6 +38,7 @@ _ROOT = _HERE.parent
 sys.path.insert(0, str(_ROOT))
 
 from src.config import OCR_OUTPUT_DIR, get_ocr_raw_md_dir
+from src.phase3_text_verification.agy_client import AgyClient
 from src.phase3_text_verification.llm_client import LLMClient
 from src.phase3_text_verification.patch_generator import merge_patches, process_page
 from src.phase3_text_verification.report_builder import build_report
@@ -62,14 +72,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--book-slug", required=True,
         help="Book slug directory name, e.g. 'Aadarsh_bhaktgatha'",
     )
+
+    # ── backend selection ────────────────────────────────────────────────────
+    p.add_argument(
+        "--agy", action="store_true",
+        help="Use the Antigravity CLI (agy) as the LLM backend instead of a "
+             "local llama-server. Ignores --server-url.",
+    )
+
+    # ── local llama-server options (ignored when --agy is set) ───────────────
     p.add_argument(
         "--server-url", default="http://127.0.0.1:8080/v1",
-        help="llama-server base URL (default: http://127.0.0.1:8080/v1)",
+        help="llama-server base URL (default: http://127.0.0.1:8080/v1). "
+             "Ignored when --agy is set.",
     )
     p.add_argument(
-        "--model-name", default="gemma-4-e2b",
-        help="Model name to pass in API requests (default: gemma-4-e2b)",
+        "--model-name", default=None,
+        help="Model name to use. Defaults to 'gemma-4-e2b' for local backend "
+             "or 'gemini-3.6-flash-low' for --agy backend.",
     )
+
+    # ── shared options ───────────────────────────────────────────────────────
     p.add_argument(
         "--pages", default=None,
         help="Page range to process, e.g. '1-10' or '5'. Omit for all pages.",
@@ -80,7 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--max-tokens", type=int, default=4096,
-        help="Max tokens for the LLM response (default: 4096)",
+        help="Max tokens for the LLM response (default: 4096). "
+             "Ignored when --agy is set.",
     )
     p.add_argument(
         "--force", action="store_true",
@@ -118,21 +142,36 @@ def main() -> int:
 
     patches_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── LLM client health check ───────────────────────────────────────────────
-    logger.info("Connecting to LLM server: %s  model: %s", args.server_url, args.model_name)
-    client = LLMClient(
-        base_url=args.server_url,
-        model_name=args.model_name,
-        timeout=args.timeout,
-        max_tokens=args.max_tokens,
-    )
-    if not client.health_check():
-        logger.error(
-            "Cannot reach llama-server at %s.\n"
-            "Start it with:  llama-server -m <model.gguf> --port 8080",
-            args.server_url,
+    # ── build LLM client ─────────────────────────────────────────────────────
+    if args.agy:
+        model_name = args.model_name or "gemini-3.6-flash-low"
+        logger.info("Backend: Antigravity CLI (agy)  model: %s", model_name)
+        client: LLMClient | AgyClient = AgyClient(
+            model_name=model_name,
+            timeout=args.timeout,
         )
-        return 1
+        if not client.health_check():
+            logger.error(
+                "Cannot reach Antigravity CLI.\n"
+                "Make sure `agy` is installed and authenticated.",
+            )
+            return 1
+    else:
+        model_name = args.model_name or "gemma-4-e2b"
+        logger.info("Backend: llama-server  url: %s  model: %s", args.server_url, model_name)
+        client = LLMClient(
+            base_url=args.server_url,
+            model_name=model_name,
+            timeout=args.timeout,
+            max_tokens=args.max_tokens,
+        )
+        if not client.health_check():
+            logger.error(
+                "Cannot reach llama-server at %s.\n"
+                "Start it with:  llama-server -m <model.gguf> --port 8080",
+                args.server_url,
+            )
+            return 1
 
     # ── determine pages to process ────────────────────────────────────────────
     max_page = len(md_files)
