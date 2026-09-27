@@ -1,0 +1,133 @@
+This project ("text-extract") is a pipeline for Gujarati PDF text extraction, OCR verification,
+and searchable artifact generation. The pipeline code in this repository is provided for
+personal, research, educational, and non-commercial use.
+
+The authors make no warranties, express or implied, regarding the fitness of this software
+for any particular purpose. Use at your own risk.
+
+---
+
+THIRD-PARTY COMPONENT LICENSES
+===============================
+
+This software integrates multiple third-party libraries and models. Your use of this software
+requires compliance with each component's license. The key components and their licenses are:
+
+
+1. bodhan-ai/indic-ocr (IndicOCR Model)
+   License : Indic Open Model License v1.0 (custom, "license:other" on Hugging Face)
+   Full text: https://github.com/Bodhan-AI/bodhan-model-info/blob/main/licenses/indic-open-model-license/v1/Indic_Open_Model_License.md
+   Summary : https://github.com/Bodhan-AI/bodhan-model-info/blob/main/licenses/indic-open-model-license/v1/Indic_Open_Model_License_Deed.md
+   HF page : https://huggingface.co/bodhan-ai/indic-ocr
+   Notes   : Access requires registering on the model's Hugging Face page and agreeing to
+             the license. Permits research, government, nonprofit, and limited commercial use
+             with attribution. Hosting-as-a-service requires prior approval from Bodhan AI.
+             The model internally incorporates components under Apache 2.0 (PP-DocLayoutV3,
+             Sarvam-30B tokenizer).
+
+
+2. PyMuPDF (fitz)
+   License : GNU Affero General Public License v3.0 (AGPL-3.0)
+             or a commercial license from Artifex Software, Inc.
+   URL     : https://pymupdf.readthedocs.io/en/latest/about.html#license-and-copyright
+   Notes   : If you distribute software that uses PyMuPDF, the AGPL-3.0 terms apply unless
+             you hold a commercial license from Artifex.
+
+
+3. PyTorch (torch, torchvision, torchaudio)
+   License : BSD 3-Clause License
+   URL     : https://github.com/pytorch/pytorch/blob/main/LICENSE
+
+
+4. Hugging Face Transformers
+   License : Apache License 2.0
+   URL     : https://github.com/huggingface/transformers/blob/main/LICENSE
+
+
+5. Hugging Face Hub (huggingface-hub)
+   License : Apache License 2.0
+   URL     : https://github.com/huggingface/huggingface_hub/blob/main/LICENSE
+
+
+6. Hugging Face Accelerate
+   License : Apache License 2.0
+   URL     : https://github.com/huggingface/accelerate/blob/main/LICENSE
+
+
+7. Tokenizers
+   License : Apache License 2.0
+   URL     : https://github.com/huggingface/tokenizers/blob/main/LICENSE
+
+
+8. SentencePiece
+   License : Apache License 2.0
+   URL     : https://github.com/google/sentencepiece/blob/master/LICENSE
+
+
+9. timm (PyTorch Image Models)
+   License : Apache License 2.0
+   URL     : https://github.com/huggingface/pytorch-image-models/blob/main/LICENSE
+
+
+10. ONNX Runtime
+    License : MIT License
+    URL     : https://github.com/microsoft/onnxruntime/blob/main/LICENSE
+
+
+11. Flash Attention 2 (flash-attn, optional)
+    License : BSD 3-Clause License
+    URL     : https://github.com/Dao-AILab/flash-attention/blob/main/LICENSE
+
+
+12. Pillow
+    License : Historical Permission Notice and Disclaimer (HPND) / MIT-like
+    URL     : https://github.com/python-pillow/Pillow/blob/main/LICENSE
+
+
+13. OpenCV (opencv-python-headless)
+    License : Apache License 2.0
+    URL     : https://github.com/opencv/opencv/blob/master/LICENSE
+
+
+14. OpenAI Python Client (openai)
+    License : Apache License 2.0
+    URL     : https://github.com/openai/openai-python/blob/main/LICENSE
+
+
+15. httpx
+    License : BSD 3-Clause License
+    URL     : https://github.com/encode/httpx/blob/master/LICENSE.md
+
+
+16. diff-match-patch
+    License : Apache License 2.0
+    URL     : https://github.com/google/diff-match-patch/blob/master/LICENSE
+
+
+17. tqdm
+    License : MIT License / Mozilla Public License 2.0
+    URL     : https://github.com/tqdm/tqdm/blob/master/LICENCE
+
+
+18. python-dotenv
+    License : BSD 3-Clause License
+    URL     : https://github.com/theskumar/python-dotenv/blob/main/LICENSE
+
+
+19. Pydantic
+    License : MIT License
+    URL     : https://github.com/pydantic/pydantic/blob/main/LICENSE
+
+
+20. llama.cpp / llama-server (runtime dependency, not bundled)
+    License : MIT License
+    URL     : https://github.com/ggerganov/llama.cpp/blob/master/LICENSE
+    Notes   : Used as an external server process for Phase 3 LLM verification.
+              Not distributed with this repository; must be installed separately.
+
+
+---
+
+By downloading, installing, or using any part of this software, you acknowledge that you
+have read and agree to comply with each of the above license terms as they apply to the
+respective components.
