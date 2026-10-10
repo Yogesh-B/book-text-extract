@@ -56,7 +56,11 @@ def get_default_device() -> str:
     """Determine best available compute device for OCR."""
     try:
         import torch
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
     except ImportError:
         return "cpu"
 

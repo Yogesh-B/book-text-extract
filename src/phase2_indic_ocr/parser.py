@@ -52,10 +52,12 @@ class IndicOCRParser:
 
     @staticmethod
     def cleanup_memory() -> None:
-        """Free cached GPU memory and trigger garbage collection."""
+        """Free cached GPU and MPS memory and trigger garbage collection."""
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
+        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+            torch.mps.empty_cache()
         gc.collect()
 
     def parse_page(

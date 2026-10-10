@@ -260,8 +260,8 @@ def main():
         "--device",
         type=str,
         default=None,
-        choices=["cuda", "cpu"],
-        help="Explicit compute device ('cuda' or 'cpu')",
+        choices=["cuda", "mps", "cpu"],
+        help="Explicit compute device ('cuda', 'mps', or 'cpu')",
     )
     parser.add_argument(
         "--no-reorder",

@@ -156,12 +156,12 @@ python scripts/run_phase2.py -b MyBook --crop-batch-size 8
 | `--max-pages` | — | `int` | unlimited | Maximum pages to process (useful for smoke tests) |
 | `--output-dir` | `-o` | `str` | `data/ocr_output/<slug>/` | Custom output root directory |
 | `--model-path` | — | `str` | auto-located | Custom path to indic-ocr model weights |
-| `--device` | — | `cuda`/`cpu` | auto | Explicit compute device |
+| `--device` | — | `cuda`/`mps`/`cpu` | auto | Explicit compute device (`cuda` for NVIDIA GPU, `mps` for Apple Silicon M-series, `cpu` fallback) |
 | `--no-reorder` | — | flag | off | Disable column clustering and top-to-bottom block reordering |
 | `--y-tolerance` | — | `float` | `20.0` | Vertical pixel tolerance for grouping same-line elements |
-| `--compile` | — | flag | off | Enable `torch.compile(dynamic=True)` for ~18% faster inference |
+| `--compile` | — | flag | off | Enable `torch.compile(dynamic=True)` for ~18% faster inference (CUDA/Linux only; falls back to eager on MPS) |
 | `--force` | `-f` | flag | off | Overwrite completed pages and re-run OCR |
-| `--crop-batch-size` | — | `int` | auto | Text crop batch size sent to the recognizer. Auto: 2 on <=4.5 GB VRAM, 8 on larger GPUs. Set to 1-2 to prevent OOM on dense pages. |
+| `--crop-batch-size` | — | `int` | auto | Text crop batch size sent to the recognizer. Auto: 2 on <=4.5 GB VRAM, 8 on Apple MPS or >=6GB GPUs. Set to 1-2 to prevent OOM on dense pages. |
 
 ### Outputs
 
@@ -175,11 +175,11 @@ python scripts/run_phase2.py -b MyBook --crop-batch-size 8
 
 All progress is continuously flushed to `checkpoint.json` after every page. If the process is interrupted, re-running the same command will automatically **skip completed pages** and continue from where it left off. Pages in the checkpoint's `failed_pages` list can be retried with `--retry-failed` or via `retry_failed.py`.
 
-### VRAM & Memory Tips
+### Hardware, VRAM & Memory Tips
 
-- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set automatically by the script to reduce CUDA memory fragmentation on GPUs with <=4 GB VRAM.
-- If you encounter CUDA OOM errors, lower `--crop-batch-size` to `2` or `1`, or fall back to `--device cpu`.
-- `--compile` provides an ~18% inference speedup at the cost of a ~30-second warm-up on first invocation.
+- **NVIDIA Linux GPUs:** `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set automatically to reduce CUDA memory fragmentation on <=4 GB GPUs. `--compile` provides an ~18% inference speedup at the cost of a ~30-second warm-up on the first page batch.
+- **Apple Silicon (M-series / M4):** Run with `--device mps`. PyTorch uses unified memory via Metal Performance Shaders. On systems with 16GB–24GB Unified Memory, you can safely scale `--crop-batch-size` to `8` or `16` for higher throughput. `--compile` will log a warning and run in eager MPS mode.
+- If you encounter memory errors on dense pages, lower `--crop-batch-size` to `2` or `1`, or fall back to `--device cpu`.
 
 ---
 

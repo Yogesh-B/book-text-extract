@@ -75,6 +75,9 @@ def load_indic_ocr(
     if target_device == "cuda" and not torch.cuda.is_available():
         logger.warning("CUDA requested or defaulted, but CUDA is unavailable. Falling back to CPU.")
         target_device = "cpu"
+    elif target_device == "mps" and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        logger.warning("MPS requested or defaulted, but MPS is unavailable. Falling back to CPU.")
+        target_device = "cpu"
 
     logger.info(f"Loading IndicOCR model from: {resolved_path}")
     logger.info(f"Target compute device: {target_device}")
@@ -82,43 +85,53 @@ def load_indic_ocr(
         gpu_name = torch.cuda.get_device_name(0)
         vram_alloc = torch.cuda.memory_allocated(0) / (1024 * 1024)
         logger.info(f"GPU: {gpu_name} (Initial allocated VRAM: {vram_alloc:.1f} MB)")
-
-    if target_device == "cuda":
         torch.backends.cudnn.benchmark = True
         logger.info("cuDNN benchmark mode enabled (auto-selects fastest convolution kernel).")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         logger.info("TF32 enabled for matmul and cuDNN (Tensor Core acceleration on Ampere+).")
+    elif target_device == "mps":
+        logger.info("Using Apple Silicon Metal Performance Shaders (MPS) accelerator.")
 
     t0 = time.time()
     parser = IndicOCR.from_pretrained(resolved_path, device=target_device)
     load_time = time.time() - t0
 
-    # Determine batch size: if not explicitly specified via CLI, auto-tune for small GPUs (<=4.5 GB)
+    # Determine batch size: if not explicitly specified via CLI, auto-tune based on hardware
     effective_crop_batch_size = crop_batch_size
-    if effective_crop_batch_size is None and target_device == "cuda":
-        total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-        if total_vram_gb <= 4.5:
-            effective_crop_batch_size = 2
-            logger.info(
-                f"Auto-detected {total_vram_gb:.2f} GB GPU VRAM (<= 4.5 GB). "
-                f"Auto-tuning default crop batch_size = {effective_crop_batch_size} to prevent CUDA OOM."
-            )
+    if effective_crop_batch_size is None:
+        if target_device == "cuda":
+            total_vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            if total_vram_gb <= 4.5:
+                effective_crop_batch_size = 2
+                logger.info(
+                    f"Auto-detected {total_vram_gb:.2f} GB GPU VRAM (<= 4.5 GB). "
+                    f"Auto-tuning default crop batch_size = {effective_crop_batch_size} to prevent CUDA OOM."
+                )
+        elif target_device == "mps":
+            effective_crop_batch_size = 8
+            logger.info("Auto-tuning default crop batch_size = 8 for Apple Silicon MPS (Unified Memory).")
 
     if effective_crop_batch_size is not None:
         set_recognizer_batch_size(parser, effective_crop_batch_size)
 
     if compile_model:
-        logger.info("Applying torch.compile(dynamic=True) to recognizer model...")
-        tc0 = time.time()
-        parser.recognizer.backend.model = torch.compile(
-            parser.recognizer.backend.model,
-            dynamic=True,
-        )
-        logger.info(
-            f"torch.compile attached in {time.time() - tc0:.2f}s "
-            "(graph tracing/optimization will complete during first page batch)."
-        )
+        if target_device == "mps":
+            logger.warning(
+                "torch.compile(dynamic=True) is not fully supported on Apple MPS. "
+                "Running recognizer model in eager MPS mode."
+            )
+        else:
+            logger.info("Applying torch.compile(dynamic=True) to recognizer model...")
+            tc0 = time.time()
+            parser.recognizer.backend.model = torch.compile(
+                parser.recognizer.backend.model,
+                dynamic=True,
+            )
+            logger.info(
+                f"torch.compile attached in {time.time() - tc0:.2f}s "
+                "(graph tracing/optimization will complete during first page batch)."
+            )
 
     logger.info(f"IndicOCR loaded successfully in {load_time:.2f}s on {target_device}.")
     return parser

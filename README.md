@@ -35,8 +35,12 @@ PDF → High-Res Images → IndicOCR Transcription → LLM Verification & Patch 
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# For GPU (CUDA 12.x — strongly recommended for Phase 2):
+# For NVIDIA GPU (CUDA 12.x — strongly recommended for Linux):
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# For Apple Silicon (M-series / Mac mini / MacBook):
+# PyTorch includes Metal Performance Shaders (MPS) by default:
+pip install torch torchvision torchaudio
 ```
 
 ### 2. Configure Environment
@@ -52,10 +56,17 @@ cp .env.example .env
 # Phase 1: PDF → Images
 python scripts/run_phase1.py --input "books/Nari Ratno (SGVP).pdf" --dpi 300
 
-# Phase 2: Images → Raw OCR (GPU recommended)
+# Phase 2: Images → Raw OCR (CUDA on Linux or MPS on Apple Silicon)
 python scripts/run_phase2.py \
   --images-dir data/images/Nari_Ratno_SGVP/ \
   --output-dir data/ocr_output/Nari_Ratno_SGVP/raw/
+
+# On Apple Silicon M-series (Mac mini / MacBook):
+# Uses Metal Performance Shaders (MPS) with higher batch size:
+python scripts/run_phase2.py \
+  --images-dir data/images/Nari_Ratno_SGVP/ \
+  --device mps \
+  --crop-batch-size 8
 
 # Phase 3: Raw OCR → Patch files (requires llama-server running locally)
 python scripts/run_phase3_verify.py \
@@ -98,6 +109,7 @@ Access requires accepting the [Indic Open Model License v1.0](https://github.com
 ## Documentation
 
 - [`docs/SCRIPTS_REFERENCE.md`](docs/SCRIPTS_REFERENCE.md) — Full CLI reference for all scripts
+- [`docs/apple_m4_vs_rtx2050_optimization.md`](docs/apple_m4_vs_rtx2050_optimization.md) — Apple Silicon (M4) vs RTX 2050 benchmark analysis & MLX/CoreML guide
 - [`docs/environment_versions.md`](docs/environment_versions.md) — Tested environment and version info
 - [`PLAN.md`](PLAN.md) — Detailed architecture and implementation plan
 
