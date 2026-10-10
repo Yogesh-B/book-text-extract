@@ -85,8 +85,8 @@ def load_indic_ocr(
         gpu_name = torch.cuda.get_device_name(0)
         vram_alloc = torch.cuda.memory_allocated(0) / (1024 * 1024)
         logger.info(f"GPU: {gpu_name} (Initial allocated VRAM: {vram_alloc:.1f} MB)")
-        torch.backends.cudnn.benchmark = True
-        logger.info("cuDNN benchmark mode enabled (auto-selects fastest convolution kernel).")
+        # torch.backends.cudnn.benchmark = True
+        # logger.info("cuDNN benchmark mode enabled (auto-selects fastest convolution kernel).")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         logger.info("TF32 enabled for matmul and cuDNN (Tensor Core acceleration on Ampere+).")
