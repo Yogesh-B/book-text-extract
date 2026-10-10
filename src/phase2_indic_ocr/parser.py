@@ -56,7 +56,7 @@ class IndicOCRParser:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
-        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+        if hasattr(torch, "backends") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
         gc.collect()
 
