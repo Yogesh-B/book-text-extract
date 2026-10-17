@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
 set -e
 
-PART_FILE=$1
+DELETE_IMAGES=true
+PART_FILE=""
+
+# Parse arguments
+for arg in "$@"; do
+    case "$arg" in
+        --no-delete)
+            DELETE_IMAGES=false
+            ;;
+        *)
+            if [ -z "$PART_FILE" ]; then
+                PART_FILE="$arg"
+            fi
+            ;;
+    esac
+done
 
 if [ -z "$PART_FILE" ]; then
-    echo "Usage: ./scripts/run_safe_batch.sh temp/parts/part_1.txt"
+    echo "Usage: ./scripts/run_safe_batch.sh temp/parts/part_1.txt [--no-delete]"
     exit 1
 fi
 
@@ -48,13 +63,17 @@ while IFS= read -r book_pdf || [ -n "$book_pdf" ]; do
 
     # 2. Run Phase 2 (Images -> Markdown & JSON with 24GB VRAM batch size)
     # Don't abort entire part if a few pages fail; errors are recorded in checkpoint.json
-    "$PYTHON_BIN" scripts/run_phase2.py -b "$book_slug" --crop-batch-size 32 || {
+    "$PYTHON_BIN" scripts/run_phase2.py -b "$book_slug" --crop-batch-size 4 || {
         echo "[WARNING] Phase 2 encountered page issues for $book_slug. Check checkpoint.json."
     }
 
     # 3. CRITICAL: Clean up images immediately to stay under 30GB disk limit
-    echo "[CLEANUP] Removing intermediate images for: $book_slug"
-    rm -rf "data/images/$book_slug"
+    if [ "$DELETE_IMAGES" = true ]; then
+        echo "[CLEANUP] Removing intermediate images for: $book_slug"
+        rm -rf "data/images/$book_slug"
+    else
+        echo "[SKIP CLEANUP] Keeping images for: $book_slug (--no-delete)"
+    fi
 
     # 4. Check available disk space
     df -h / | awk 'NR==2 {print "Disk Available: "$4" / "$2" ("$5" used)"}'
@@ -71,7 +90,7 @@ if [ "${AUTO_RETRY:-1}" = "1" ]; then
     echo "=============================================="
     echo "Running Automatic Targeted Retry (batch size 8)..."
     echo "=============================================="
-    "$PYTHON_BIN" scripts/retry_failed.py --part "$PART_FILE" --crop-batch-size 8
+    "$PYTHON_BIN" scripts/retry_failed.py --part "$PART_FILE" --crop-batch-size 2
 
     echo "=============================================="
     echo "Final Failure Report After Retry:"
