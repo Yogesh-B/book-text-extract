@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 # Base Paths
@@ -25,6 +26,22 @@ KNOWN_BOOK_SLUGS = {
     "ભક્ત કલ્પતરૂ 1 (વંથલિ ગુરુકુલ).pdf": "Bhakt_Kalpataru_1_Vanthali_Gurukul",
 }
 
+
+def _is_slug_char(ch: str) -> bool:
+    """Check if a character should be preserved in a book slug.
+
+    Keeps word characters (letters, digits, underscore) AND Unicode
+    combining marks (category M) which include Indic viramas, matras,
+    and other dependent vowel/consonant signs essential for readable
+    Gujarati text.
+    """
+    if ch == "_":
+        return True
+    cat = unicodedata.category(ch)
+    # L = Letter, N = Number, M = Mark (virama, matras, etc.)
+    return cat[0] in ("L", "N", "M")
+
+
 def get_book_slug(pdf_path: str | Path) -> str:
     """Return a clean directory slug for a PDF filename."""
     name = Path(pdf_path).name
@@ -33,8 +50,11 @@ def get_book_slug(pdf_path: str | Path) -> str:
 
     # Clean up name: remove .pdf extension
     stem = Path(pdf_path).stem
-    # Replace non-word characters (spaces, punctuation, brackets) with underscore
-    slug = re.sub(r"[^\w]+", "_", stem, flags=re.UNICODE).strip("_")
+    # Replace characters that are not letters, digits, marks, or underscores.
+    # Unlike the bare \w regex, this preserves Unicode combining marks (category M)
+    # so Gujarati conjuncts (e.g. શ્રી) stay intact instead of becoming શ_ર.
+    slug = "".join(ch if _is_slug_char(ch) else "_" for ch in stem)
+    slug = re.sub(r"_+", "_", slug).strip("_")
     return slug or "unnamed_book"
 
 
