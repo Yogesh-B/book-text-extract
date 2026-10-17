@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -e
 
-DELETE_IMAGES=true
+DELETE_IMAGES=false
 PART_FILE=""
 
 # Parse arguments
 for arg in "$@"; do
     case "$arg" in
-        --no-delete)
-            DELETE_IMAGES=false
+        --delete)
+            DELETE_IMAGES=true
             ;;
         *)
             if [ -z "$PART_FILE" ]; then
@@ -19,7 +19,7 @@ for arg in "$@"; do
 done
 
 if [ -z "$PART_FILE" ]; then
-    echo "Usage: ./scripts/run_safe_batch.sh temp/parts/part_1.txt [--no-delete]"
+    echo "Usage: ./scripts/run_safe_batch.sh temp/parts/part_1.txt [--delete]"
     exit 1
 fi
 
@@ -72,7 +72,7 @@ while IFS= read -r book_pdf || [ -n "$book_pdf" ]; do
         echo "[CLEANUP] Removing intermediate images for: $book_slug"
         rm -rf "data/images/$book_slug"
     else
-        echo "[SKIP CLEANUP] Keeping images for: $book_slug (--no-delete)"
+        echo "[SKIP CLEANUP] Keeping images for: $book_slug (use --delete to remove)"
     fi
 
     # 4. Check available disk space
